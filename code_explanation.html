@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Pong Game - Code Explanation</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 30px; background-color: #f0f2f5; }
+        .container { background-color: #fff; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0; }
+        h2 { color: #34495e; margin-top: 35px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        h3 { color: #e67e22; margin-top: 25px; }
+        p { margin-bottom: 15px; font-size: 1.05em; }
+        ul { margin-bottom: 20px; padding-left: 20px; }
+        li { margin-bottom: 10px; }
+        code { background-color: #fdf6e3; padding: 3px 6px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; color: #c0392b; border: 1px solid #eee; }
+        .filename { font-weight: bold; color: #2980b9; }
+        hr { border: 0; height: 1px; background-color: #ddd; margin: 40px 0; }
+        
+        .role-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; color: white; font-weight: bold; font-size: 0.9em; margin-right: 5px; }
+        .p1 { background-color: #e74c3c; }
+        .p2 { background-color: #2ecc71; color: #2c3e50; }
+        .spectator { background-color: #95a5a6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Multiplayer Pong Game - Code Explanation</h1>
+        <p>This document explains the codebase that powers your real-time multiplayer Pong game, using Socket.io and Node.js. The logic is strictly divided: the server (<code class="filename">index.js</code>) acts as the authoritative source of truth that calculates the game rules, and the client (<code class="filename">views/index.ejs</code>) acts as a "dumb" terminal that just takes keyboard inputs and draws pictures.</p>
+        
+        <hr>
+
+        <h2>1. Server-Side (<code class="filename">index.js</code>)</h2>
+        <p>The server is responsible for hosting the application, keeping track of connected players, processing the physical game state (ball position, paddle positions, score), and broadcasting that state to all connected clients.</p>
+
+        <h3>Server Initialization</h3>
+        <ul>
+            <li><strong>Lines 1-7:</strong> We import <code>express</code>, <code>http</code>, and <code>socket.io</code>. We initialize the Express <code>app</code>, wrap it in a standard Node.js <code>http.createServer(app)</code>, and attach the <code>socket.io</code> <code>Server</code> instance to it. This allows HTTP traffic (for loading the website) and WebSocket traffic (for real-time data) to share the same port.</li>
+            <li><strong>Lines 9-15:</strong> Express setup. We set <code>ejs</code> as the view engine to render our HTML. Static file serving is set up, and the root route (<code>/</code>) is configured to send the <code>index.ejs</code> HTML file to users when they visit the site.</li>
+        </ul>
+
+        <h3>Game State Variables</h3>
+        <ul>
+            <li><strong>Lines 17-23:</strong> We define physical dimensions for the game space (<code>canvasWidth</code>, <code>canvasHeight</code>) and a <code>players</code> object to keep track of connection socket IDs for <code>p1</code> (left player) and <code>p2</code> (right player).</li>
+            <li><strong>Lines 25-35:</strong> The central <code>gameState</code> object. This is the <strong>single source of truth</strong> for the game. It mathematically represents the game world: containing the <code>y</code> positions and scores for both paddles, and the <code>x</code>, <code>y</code>, velocities (<code>dx</code>, <code>dy</code>), and radius for the ball.</li>
+            <li><strong>Lines 37-38:</strong> Constants for paddle speed and paddle height.</li>
+        </ul>
+
+        <h3>Ball Reset Logic</h3>
+        <ul>
+            <li><strong>Lines 40-47:</strong> The <code>resetBall()</code> function centers the ball and assigns it a random horizontal and vertical velocity. This logic runs when the server first starts and whenever a player scores a point.</li>
+        </ul>
+
+        <h3>Socket.io - Connection & Events</h3>
+        <ul>
+            <li><strong>Line 49:</strong> <code>io.on('connection', (socket) => { ... })</code> triggers every time a new user connects to the server via their browser.</li>
+            <li><strong>Lines 52-64:</strong> <strong>Role Assignment</strong>. When a user connects, the server checks if player slots (<code>p1</code> or <code>p2</code>) are empty. If <code>p1</code> is free, the user is assigned the <code>'p1'</code> role and their unique <code>socket.id</code> is saved. The same applies for <code>p2</code>. Any subsequent connections are assigned the <code>'spectator'</code> role. The role is sent back to the specific client using <code>socket.emit('role', ...)</code>.</li>
+            <li><strong>Lines 66-79:</strong> <strong>Disconnection Handling</strong>. When a user closes the tab, <code>socket.on('disconnect')</code> fires automatically. If the disconnected user was <code>p1</code> or <code>p2</code>, their slot is reopened (<code>null</code>), scores are reset to 0, and the ball is reset to the center.</li>
+            <li><strong>Lines 81-89:</strong> <strong>Handling Player Input</strong>. The server listens for <code>'move'</code> events from clients. If a player presses up or down on their keyboard, the server verifies their assigned role and mathematically updates their paddle's <code>y</code> coordinate in the global <code>gameState</code>.</li>
+        </ul>
+
+        <h3>Authoritative Game Loop</h3>
+        <ul>
+            <li><strong>Lines 92-123:</strong> <code>setInterval(() => { ... }, 1000 / 60)</code> acts as our physics engine loop. It runs 60 times per second (~60fps) to update the game world.</li>
+            <li><strong>Lines 93-97:</strong> The loop only runs the ball physics if <strong>both</strong> players are actively connected. Every tick, the ball moves continuously by adding its velocity (<code>dx</code>, <code>dy</code>) to its coordinates.</li>
+            <li><strong>Lines 98-100:</strong> Wall collision. If the ball mathematically hits the top (<code>&lt; 40</code>) or bottom of the screen bounds, its vertical velocity (<code>dy</code>) is inverted (<code>*=-1</code>) to make it bounce off the wall.</li>
+            <li><strong>Lines 102-111:</strong> Paddle collision logic. The <code>checkCollision()</code> helper detects if the ball's coordinates intersect with the rectangular bounding box of a paddle. If it hits the left (<code>120</code>) or right (<code>canvasWidth - 140</code>) paddle, the horizontal velocity (<code>dx</code>) is inverted and slightly sped up (<code>-1.1</code>), creating a bounce.</li>
+            <li><strong>Lines 113-119:</strong> Scoring logic. If the ball goes beyond the left boundary (<code>&lt; 100</code>), <span class="role-badge p2">Player 2</span> scores. If it goes past the right boundary, <span class="role-badge p1">Player 1</span> scores. In both cases, the ball is reset to the center via <code>resetBall()</code>.</li>
+            <li><strong>Line 122:</strong> <code>io.emit('gameState', gameState);</code> takes the entirely calculated physics <code>gameState</code> and broadcasts it to <strong>all</strong> connected clients 60 times per second over WebSockets.</li>
+        </ul>
+
+        <h3>Starting the Server</h3>
+        <ul>
+            <li><strong>Lines 125-127:</strong> The server starts listening for connections on port <code>3005</code> at the local network IP <code>"192.168.29.178"</code>.</li>
+        </ul>
+
+        <hr>
+
+        <h2>2. Client-Side (<code class="filename">views/index.ejs</code>)</h2>
+        <p>The client side does absolutely no math or physics. Its only jobs are to capture keyboard input, send it to the server, and draw exactly what the server dictates 60 times every second.</p>
+
+        <h3>HTML Structure and CSS</h3>
+        <ul>
+            <li><strong>Lines 5-23:</strong> Standard CSS styling to make the canvas centrally aligned on the screen, setting a background color, and centering it using Flexbox.</li>
+            <li><strong>Line 28:</strong> The <code>&lt;canvas&gt;</code> element explicitly set to <code>1280x720</code> resolution. This matches the dimensions the server is calculating against.</li>
+            <li><strong>Line 30:</strong> We import the <code>socket.io</code> client-side script so we can establish a WebSocket connection.</li>
+        </ul>
+
+        <h3>Initialization & State Synchronization</h3>
+        <ul>
+            <li><strong>Lines 32-34:</strong> We grab the canvas and its 2D drawing context (<code>ctx</code>), and initialize the WebSockets <code>socket</code> connection.</li>
+            <li><strong>Lines 39-43:</strong> Defines a listener for the <code>'role'</code> assignment event from the server. This string tells the client if it is controlling <span class="role-badge p1">p1</span>, <span class="role-badge p2">p2</span>, or is a <span class="role-badge spectator">spectator</span>.</li>
+            <li><strong>Lines 45-49:</strong> We define a placeholder fallback <code>gameState</code> on the client so that the canvas doesn't throw a JavaScript error trying to draw undefined variables before the server sends its first sync event.</li>
+            <li><strong>Lines 51-53:</strong> Listens for the <code>'gameState'</code> event broadcasted by the server loop. It acts as a mirror, continuously overriding the local <code>gameState</code> object with the server's true calculations.</li>
+        </ul>
+
+        <h3>Keyboard Input Handling</h3>
+        <ul>
+            <li><strong>Lines 55-67:</strong> We track the literal boolean state (<code>true</code>/<code>false</code>) of the keys: <code>w</code>, <code>s</code>, <code>ArrowUp</code>, and <code>ArrowDown</code> using standard DOM <code>keydown</code> and <code>keyup</code> event listeners.</li>
+        </ul>
+
+        <h3>Emitting Movements</h3>
+        <ul>
+            <li><strong>Lines 69-74:</strong> A localized client loop <code>setInterval()</code> runs at 60fps. If the user's assigned <code>role</code> is <span class="role-badge p1">p1</span> or <span class="role-badge p2">p2</span>, it checks if any movement keys are currently pressed down in our tracker dictionary. If so, it immediately emits a <code>'move'</code> event to the server with the direction (<code>'up'</code> or <code>'down'</code>).</li>
+        </ul>
+
+        <h3>Rendering Logic</h3>
+        <ul>
+            <li><strong>Lines 76-119:</strong> These helper functions use standard HTML5 Canvas syntax (<code>ctx.fillRect</code>, <code>ctx.beginPath</code>, <code>ctx.arc</code>, <code>ctx.fillText</code>) to draw the table (background/nets), the paddles, the scores, and the single ball.</li>
+            <li><strong>Lines 121-130:</strong> The <code>render()</code> function forms the visual loop.
+                <ul>
+                    <li><code>ctx.clearRect()</code> wipes the previous frame completely clean.</li>
+                    <li>It draws the background table.</li>
+                    <li>It draws the left paddle exactly where <code>gameState.p1.y</code> tells it to be.</li>
+                    <li>It draws the right paddle exactly where <code>gameState.p2.y</code> tells it to be.</li>
+                    <li>It draws the ball using <code>gameState.ball.x</code> and <code>gameState.ball.y</code>.</li>
+                    <li><code>requestAnimationFrame(render)</code> tells the browser to execute this <code>render</code> function again right before the next screen repaint, guaranteeing a smooth visual frame rate linked to the monitor's refresh rate.</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</body>
+</html>
